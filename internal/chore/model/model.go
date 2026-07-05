@@ -152,6 +152,7 @@ type NotificationMetadata struct {
 type NotificationTemplate struct {
 	Value int                      `json:"value"`
 	Unit  NotificationTemplateUnit `json:"unit"`
+	Repeat bool                    `json:"repeat,omitempty"`
 }
 
 type NotificationTemplateUnit string

@@ -177,6 +177,14 @@ func (r *ChoreRepository) GetChore(c context.Context, choreID int, userID int, c
 	return &chore, nil
 }
 
+func (r *ChoreRepository) GetChoreByID(c context.Context, choreID int) (*chModel.Chore, error) {
+	var chore chModel.Chore
+	if err := r.db.WithContext(c).Model(&chModel.Chore{}).First(&chore, "id = ?", choreID).Error; err != nil {
+		return nil, err
+	}
+	return &chore, nil
+}
+
 // GetChores retrieves chores for a user in a circle, respecting privacy and optionally filtered by sync version.
 // If syncOptions is nil or syncOptions.SyncVersion is nil, returns all visible chores ordered by next_due_date.
 // If syncOptions.SyncVersion is set, returns only chores with sync_version > *SyncVersion, ordered by sync_version.
