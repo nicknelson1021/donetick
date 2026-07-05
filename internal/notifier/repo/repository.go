@@ -23,6 +23,11 @@ func (r *NotificationRepository) DeleteAllChoreNotifications(choreID int) error 
 func (r *NotificationRepository) BatchInsertNotifications(notifications []*nModel.Notification) error {
 	return r.db.Create(&notifications).Error
 }
+
+func (r *NotificationRepository) InsertNotification(notification *nModel.Notification) error {
+	return r.db.Create(notification).Error
+}
+
 func (r *NotificationRepository) MarkNotificationsAsSent(notifications []*nModel.NotificationDetails) error {
 	// Extract IDs from notifications
 	var ids []int

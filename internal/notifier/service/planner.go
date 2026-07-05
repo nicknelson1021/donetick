@@ -183,6 +183,9 @@ func generateNotificationsFromTemplate(chore *chModel.Chore, recipient *cModel.U
 				"due_date":          chore.NextDueDate,
 				"assignee":          assigneeName,
 				"assignee_username": assigneeUsername,
+				"template_value":    template.Value,
+				"template_unit":     template.Unit,
+				"repeat":            template.Repeat && template.Value > 0,
 			},
 		})
 
