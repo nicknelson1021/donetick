@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	chModel "donetick.com/core/internal/chore/model"
@@ -115,22 +116,32 @@ func generateNotificationsFromTemplate(chore *chModel.Chore, assignedUser *cMode
 	notifications := make([]*nModel.Notification, 0)
 
 	for _, template := range chore.NotificationMetadataV2.Templates {
+		now := time.Now().UTC()
 		scheduledTime, err := calculateScheduledTime(*chore.NextDueDate, template)
 		if err != nil {
 			// Log error and fallback to due date
 			scheduledTime = *chore.NextDueDate
 		}
 		// don't schedule if the time already pass :
-		if scheduledTime.Before(time.Now().UTC()) {
-			logging.FromContext(context.Background()).Debug("Skipping notification for template, scheduled time has passed", "scheduled_time", scheduledTime)
-			continue
+		if scheduledTime.Before(now) {
+			if template.Repeat && template.Value > 0 && chore.NextDueDate.Before(now) {
+				interval, err := calculateDuration(template.Value, template.Unit)
+				if err != nil {
+					logging.FromContext(context.Background()).Debug("Skipping repeat notification for template, invalid interval", "scheduled_time", scheduledTime)
+					continue
+				}
+				scheduledTime = nextFutureScheduledTime(scheduledTime, interval, now)
+			} else {
+				logging.FromContext(context.Background()).Debug("Skipping notification for template, scheduled time has passed", "scheduled_time", scheduledTime)
+				continue
+			}
 		}
 		eventType := getEventTypeFromTemplate(template)
 		notifications = append(notifications, &nModel.Notification{
 			ChoreID:      chore.ID,
 			IsSent:       false,
 			ScheduledFor: scheduledTime,
-			CreatedAt:    time.Now().UTC(),
+			CreatedAt:    now,
 			TypeID:       assignedUser.NotificationType,
 			UserID:       assignedUser.UserID,
 			CircleID:     assignedUser.CircleID,
@@ -152,6 +163,18 @@ func generateNotificationsFromTemplate(chore *chModel.Chore, assignedUser *cMode
 	}
 
 	return notifications
+}
+
+func nextFutureScheduledTime(previous time.Time, interval time.Duration, now time.Time) time.Time {
+	if interval <= 0 {
+		return now
+	}
+	next := previous.Add(interval)
+	if next.After(now) {
+		return next
+	}
+	intervalsBehind := math.Floor(now.Sub(next).Seconds()/interval.Seconds()) + 1
+	return next.Add(time.Duration(intervalsBehind) * interval)
 }
 
 type EventType string
