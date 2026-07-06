@@ -240,3 +240,64 @@ func TestGenerateNotificationsFromTemplateIgnoresRepeatBeforeDue(t *testing.T) {
 		t.Fatalf("expected before-due repeat metadata to be false, got %#v", notifications[0].RawEvent["repeat"])
 	}
 }
+
+func TestGenerateNotificationsFromTemplateSeedsOverdueRepeatInFuture(t *testing.T) {
+	dueDate := time.Now().UTC().Add(-48 * time.Hour)
+	chore := &chModel.Chore{
+		ID:          10,
+		Name:        "Take bins out",
+		NextDueDate: &dueDate,
+		NotificationMetadataV2: &chModel.NotificationMetadata{
+			Templates: []*chModel.NotificationTemplate{
+				{Value: 1, Unit: chModel.NotificationTemplateUnitDay, Repeat: true},
+			},
+		},
+	}
+	assignedUser := &cModel.UserCircleDetail{
+		UserCircle: cModel.UserCircle{
+			UserID:   20,
+			CircleID: 30,
+		},
+		DisplayName:      "Nick",
+		Username:         "nick",
+		NotificationType: nModel.NotificationPlatformTelegram,
+		TargetID:         "123",
+	}
+
+	notifications := generateNotificationsFromTemplate(chore, assignedUser, assignedUser, nil)
+	if len(notifications) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifications))
+	}
+	if !notifications[0].ScheduledFor.After(time.Now().UTC()) {
+		t.Fatalf("expected overdue repeat to be scheduled in the future, got %v", notifications[0].ScheduledFor)
+	}
+}
+
+func TestGenerateNotificationsFromTemplateSkipsPastNonRepeatingOverdue(t *testing.T) {
+	dueDate := time.Now().UTC().Add(-48 * time.Hour)
+	chore := &chModel.Chore{
+		ID:          10,
+		Name:        "Take bins out",
+		NextDueDate: &dueDate,
+		NotificationMetadataV2: &chModel.NotificationMetadata{
+			Templates: []*chModel.NotificationTemplate{
+				{Value: 1, Unit: chModel.NotificationTemplateUnitDay},
+			},
+		},
+	}
+	assignedUser := &cModel.UserCircleDetail{
+		UserCircle: cModel.UserCircle{
+			UserID:   20,
+			CircleID: 30,
+		},
+		DisplayName:      "Nick",
+		Username:         "nick",
+		NotificationType: nModel.NotificationPlatformTelegram,
+		TargetID:         "123",
+	}
+
+	notifications := generateNotificationsFromTemplate(chore, assignedUser, assignedUser, nil)
+	if len(notifications) != 0 {
+		t.Fatalf("expected no notification, got %d", len(notifications))
+	}
+}
