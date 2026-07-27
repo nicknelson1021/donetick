@@ -295,6 +295,16 @@ func (r *ChoreRepository) GetChoreByID(c context.Context, choreID int) (*chModel
 	return &chore, nil
 }
 
+// GetActiveOverdueChores returns notification-enabled chores that may need an
+// overdue repeat chain restored after an upgrade or restart.
+func (r *ChoreRepository) GetActiveOverdueChores(c context.Context, now time.Time) ([]*chModel.Chore, error) {
+	var chores []*chModel.Chore
+	err := r.db.WithContext(c).
+		Where("is_active = ? AND notification = ? AND next_due_date < ?", true, true, now.UTC()).
+		Find(&chores).Error
+	return chores, err
+}
+
 // GetChores retrieves chores for a user in a circle, respecting privacy and optionally filtered by sync version.
 // If syncOptions is nil or syncOptions.SyncVersion is nil, returns all visible chores ordered by next_due_date.
 // If syncOptions.SyncVersion is set, returns only chores with sync_version > *SyncVersion, ordered by sync_version.

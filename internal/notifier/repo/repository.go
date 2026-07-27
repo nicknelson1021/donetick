@@ -6,6 +6,7 @@ import (
 
 	nModel "donetick.com/core/internal/notifier/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type NotificationRepository struct {
@@ -25,10 +26,16 @@ func (r *NotificationRepository) BatchInsertNotifications(notifications []*nMode
 }
 
 func (r *NotificationRepository) InsertNotification(notification *nModel.Notification) error {
-	return r.db.Create(notification).Error
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "source_notification_id"}},
+		DoNothing: true,
+	}).Create(notification).Error
 }
 
 func (r *NotificationRepository) MarkNotificationsAsSent(notifications []*nModel.NotificationDetails) error {
+	if len(notifications) == 0 {
+		return nil
+	}
 	// Extract IDs from notifications
 	var ids []int
 	for _, notification := range notifications {

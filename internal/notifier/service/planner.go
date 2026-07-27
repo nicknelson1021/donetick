@@ -41,7 +41,10 @@ func (n *NotificationPlanner) GenerateNotifications(c context.Context, chore *ch
 		}
 	}
 
-	n.nRepo.DeleteAllChoreNotifications(chore.ID)
+	if err := n.nRepo.DeleteAllChoreNotifications(chore.ID); err != nil {
+		log.Error("Error deleting existing chore notifications", err)
+		return false
+	}
 	notifications := make([]*nModel.Notification, 0)
 	if !chore.Notification || chore.FrequencyType == "trigger" {
 
@@ -49,6 +52,9 @@ func (n *NotificationPlanner) GenerateNotifications(c context.Context, chore *ch
 	}
 
 	if chore.NextDueDate == nil {
+		return true
+	}
+	if chore.NotificationMetadataV2 == nil {
 		return true
 	}
 
@@ -70,7 +76,13 @@ func (n *NotificationPlanner) GenerateNotifications(c context.Context, chore *ch
 	}
 
 	log.Debug("Generated notifications", "count", len(notifications))
-	n.nRepo.BatchInsertNotifications(notifications)
+	if len(notifications) == 0 {
+		return true
+	}
+	if err := n.nRepo.BatchInsertNotifications(notifications); err != nil {
+		log.Error("Error inserting chore notifications", err)
+		return false
+	}
 	return true
 }
 
