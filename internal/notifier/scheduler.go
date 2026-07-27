@@ -13,6 +13,7 @@ import (
 	"donetick.com/core/internal/events"
 	nModel "donetick.com/core/internal/notifier/model"
 	nRepo "donetick.com/core/internal/notifier/repo"
+	nService "donetick.com/core/internal/notifier/service"
 	uRepo "donetick.com/core/internal/user/repo"
 	"donetick.com/core/logging"
 )
@@ -30,10 +31,11 @@ type Scheduler struct {
 	notifier         *Notifier
 	eventsProducer   *events.EventsProducer
 	notificationRepo *nRepo.NotificationRepository
+	planner          *nService.NotificationPlanner
 	SchedulerJobs    config.SchedulerConfig
 }
 
-func NewScheduler(cfg *config.Config, ur *uRepo.UserRepository, cr *chRepo.ChoreRepository, n *Notifier, nr *nRepo.NotificationRepository, ep *events.EventsProducer) *Scheduler {
+func NewScheduler(cfg *config.Config, ur *uRepo.UserRepository, cr *chRepo.ChoreRepository, n *Notifier, nr *nRepo.NotificationRepository, ep *events.EventsProducer, planner *nService.NotificationPlanner) *Scheduler {
 	return &Scheduler{
 		choreRepo:        cr,
 		userRepo:         ur,
@@ -41,6 +43,7 @@ func NewScheduler(cfg *config.Config, ur *uRepo.UserRepository, cr *chRepo.Chore
 		notifier:         n,
 		notificationRepo: nr,
 		eventsProducer:   ep,
+		planner:          planner,
 		SchedulerJobs:    cfg.SchedulerJobs,
 	}
 }
@@ -48,6 +51,9 @@ func NewScheduler(cfg *config.Config, ur *uRepo.UserRepository, cr *chRepo.Chore
 func (s *Scheduler) Start(c context.Context) {
 	log := logging.FromContext(c)
 	log.Debug("Scheduler started")
+	if err := s.reconcileOverdueRepeatNotifications(c); err != nil {
+		log.Error("Error reconciling overdue repeat notifications", err)
+	}
 	go s.runScheduler(c, " NOTIFICATION_SCHEDULER ", s.loadAndSendNotificationJob, 3*time.Minute)
 	go s.runScheduler(c, " NOTIFICATION_CLEANUP ", s.cleanupSentNotifications, 24*time.Hour*30)
 }
@@ -73,7 +79,15 @@ func (s *Scheduler) loadAndSendNotificationJob(c context.Context) (time.Duration
 		return time.Since(startTime), err
 	}
 
+	sentNotifications := make([]*nModel.NotificationDetails, 0, len(getAllPendingNotifications))
 	for _, notification := range getAllPendingNotifications {
+		// Persist the next occurrence before delivering the current one. The
+		// source-notification unique index makes this safe to retry.
+		if err := s.scheduleNextOverdueReminder(c, notification); err != nil {
+			log.Error("Error scheduling next overdue reminder", err)
+			continue
+		}
+
 		err := s.notifier.SendNotification(c, notification)
 		if err != nil {
 			log.Error("Error sending notification", err)
@@ -84,14 +98,13 @@ func (s *Scheduler) loadAndSendNotificationJob(c context.Context) (time.Duration
 			s.eventsProducer.NotificationEvent(c, *notification.WebhookURL, notification.RawEvent)
 		}
 
-		if err := s.scheduleNextOverdueReminder(c, notification); err != nil {
-			log.Error("Error scheduling next overdue reminder", err)
-		}
-
 		notification.IsSent = true
+		sentNotifications = append(sentNotifications, notification)
 	}
 
-	s.notificationRepo.MarkNotificationsAsSent(getAllPendingNotifications)
+	if err := s.notificationRepo.MarkNotificationsAsSent(sentNotifications); err != nil {
+		return time.Since(startTime), err
+	}
 	return time.Since(startTime), nil
 }
 
@@ -129,19 +142,50 @@ func (s *Scheduler) scheduleNextOverdueReminder(c context.Context, notification 
 	}
 
 	nextScheduledFor := nextFutureTime(notification.ScheduledFor.UTC(), interval, now)
+	sourceNotificationID := notification.ID
 	nextNotification := &nModel.Notification{
-		ChoreID:      notification.ChoreID,
-		IsSent:       false,
-		ScheduledFor: nextScheduledFor,
-		CreatedAt:    now,
-		TypeID:       notification.TypeID,
-		UserID:       notification.UserID,
-		CircleID:     notification.CircleID,
-		TargetID:     notification.TargetID,
-		Text:         notification.Text,
-		RawEvent:     notification.RawEvent,
+		ChoreID:              notification.ChoreID,
+		IsSent:               false,
+		ScheduledFor:         nextScheduledFor,
+		CreatedAt:            now,
+		TypeID:               notification.TypeID,
+		UserID:               notification.UserID,
+		CircleID:             notification.CircleID,
+		TargetID:             notification.TargetID,
+		Text:                 notification.Text,
+		RawEvent:             notification.RawEvent,
+		SourceNotificationID: &sourceNotificationID,
 	}
 	return s.notificationRepo.InsertNotification(nextNotification)
+}
+
+func (s *Scheduler) reconcileOverdueRepeatNotifications(c context.Context) error {
+	chores, err := s.choreRepo.GetActiveOverdueChores(c, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+
+	for _, chore := range chores {
+		if !hasRepeatingOverdueTemplate(chore) {
+			continue
+		}
+		if ok := s.planner.GenerateNotifications(c, chore); !ok {
+			logging.FromContext(c).Error("Unable to reconcile overdue repeat notifications", "chore_id", chore.ID)
+		}
+	}
+	return nil
+}
+
+func hasRepeatingOverdueTemplate(chore *chModel.Chore) bool {
+	if chore == nil || chore.NotificationMetadataV2 == nil {
+		return false
+	}
+	for _, template := range chore.NotificationMetadataV2.Templates {
+		if template != nil && template.Repeat && template.Value > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func overdueReminderInterval(value int, unit chModel.NotificationTemplateUnit) (time.Duration, error) {
