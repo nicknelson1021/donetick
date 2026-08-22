@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - repeat-overdue-reminders
-      - codex/v0.1.76-repeat-reminders
+      - codex/v0.1.79-repeat-nag
 
 permissions:
   contents: read
@@ -22,8 +22,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: nicknelson1021/frontend
-          # Pin the verified v0.1.76 repeat-reminder frontend for reproducible images.
-          ref: c98d46ee38ca8a8e8a4cfdd53f1a2f9a6bc55751
+          # Pin the verified v0.1.79 repeat-reminder frontend for reproducible images.
+          ref: efe6d7347ff770f056085e2f6b1861f78695e6f2
           path: frontend-code
 
       - name: Set up Node
